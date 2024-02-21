@@ -22,12 +22,18 @@ config = ViTConfig(
     num_channels=3,
     hidden_size=768,
     num_hidden_layers=12,
+    # num_hidden_layers=2,
     num_attention_heads=12,
+    # num_attention_heads=2,
     intermediate_size=3072,
+    # intermediate_size=512,
     hidden_act="gelu",
     hidden_dropout_prob=0.1,
+    # hidden_dropout_prob=0.0,
     attention_probs_dropout_prob=0.1,
+    # attention_probs_dropout_prob=0.0,
     classifier_dropout=0.1,
+    # classifier_dropout=0.0,
     num_labels=configs.celeba_config.classes  # Assuming you are doing classification with 1000 classes
 )
 
@@ -39,11 +45,14 @@ model_summary = summary(model, input_size=(1, 3, configs.celeba_config.img_size,
 optimizer = torch.optim.Adam(model.parameters(), lr=configs.celeba_config.vanilla_vit.learning_rate)
 
 # Load an image
-train_loader, valid_loader, test_loader = celeba_loader.get_celeba_data_loaders(batch_size=configs.batch_size)
+train_loader, valid_loader, _ = celeba_loader.get_celeba_data_loaders(batch_size=configs.batch_size,
+                                                                      return_testloader=False)
 loss_criterion = torch.nn.BCEWithLogitsLoss()
 
 valid_accuracy = 0.0
 moving_avg_weight = 0.3
+overfit_batch = False
+is_first_batch = True
 for epoch in range(configs.celeba_config.vanilla_vit.epochs):
     model.train()  # Set model to training mode
     running_loss = 0.0
@@ -51,9 +60,15 @@ for epoch in range(configs.celeba_config.vanilla_vit.epochs):
     total_predictions = 0
 
     pbar = tqdm.tqdm(train_loader)
-    for imgs, labels in pbar:
-        imgs = imgs.to(device)
-        labels = labels.to(torch.float32).to(device)
+    for imgs_this_batch, labels_this_batch in pbar:
+        if overfit_batch:
+            if is_first_batch:
+                imgs = imgs_this_batch.to(device)
+                labels = labels_this_batch.to(torch.float32).to(device)
+                is_first_batch = False
+        else:
+            imgs = imgs_this_batch.to(device)
+            labels = labels_this_batch.to(torch.float32).to(device)
 
         # Forward pass
         outputs = model(imgs)
@@ -65,18 +80,18 @@ for epoch in range(configs.celeba_config.vanilla_vit.epochs):
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item()
+        running_loss = running_loss * (1 - moving_avg_weight) + moving_avg_weight * loss.item() * labels.size(0)
 
         # Calculate accuracy
         total_predictions = total_predictions * (1 - moving_avg_weight) + moving_avg_weight * labels.size(0)
         correct_predictions = correct_predictions * (1 - moving_avg_weight) + \
-                              moving_avg_weight * multi_label_accuracy(logits, labels).item()
+                              moving_avg_weight * multi_label_accuracy(logits, labels).item() * labels.size(0)
 
         # Calculate running average of accuracy
         train_accuracy = correct_predictions / total_predictions
 
         # Update progress bar description with the latest training accuracy
-        pbar.set_description(f"Epoch: {epoch + 1}, Batch Train Acc: {train_accuracy:.4f}, "
+        pbar.set_description(f"Epoch: {epoch + 1}, Loss: {running_loss/total_predictions:0.4f}, Batch Train Acc: {train_accuracy:.4f}, "
                              f"Val Acc: {valid_accuracy:.4f}")
 
     # Validation loop, set model to evaluation mode
@@ -85,7 +100,8 @@ for epoch in range(configs.celeba_config.vanilla_vit.epochs):
     total_predictions_val = 0
 
     with torch.no_grad():
-        for imgs, labels in valid_loader:
+        pbar_valid = tqdm.tqdm(valid_loader, desc="Validation")
+        for imgs, labels in pbar_valid:
             imgs = imgs.to(device)
             labels = labels.to(device)
 
@@ -94,7 +110,7 @@ for epoch in range(configs.celeba_config.vanilla_vit.epochs):
 
             # Calculate accuracy
             total_predictions_val += labels.size(0)
-            correct_predictions_val += multi_label_accuracy(logits, labels).item()
+            correct_predictions_val += (multi_label_accuracy(logits, labels).item() * labels.size(0))
 
     valid_accuracy = correct_predictions_val / total_predictions_val
 

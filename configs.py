@@ -22,7 +22,7 @@ class CelebA:
     def __init__(self):
         self.classes = 40
         self.img_size = 128
-        self.vanilla_vit = VanillaVit(epochs=50, batch_size=64, learning_rate=0.001)
+        self.vanilla_vit = VanillaVit(epochs=50, batch_size=64, learning_rate=0.0001)
 
 
 celeba_config = CelebA()

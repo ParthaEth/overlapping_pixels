@@ -14,7 +14,7 @@ def multi_label_accuracy(outputs_logits, labels, threshold=0.5):
     - accuracy: Scalar tensor with the accuracy for the given batch.
     """
     if labels.dtype == torch.float32:
-        labels = (labels > 0.9 ).int()
+        labels = (labels > 0.9).int()
 
     # Apply sigmoid to convert logits to probabilities
     probs = torch.sigmoid(outputs_logits)

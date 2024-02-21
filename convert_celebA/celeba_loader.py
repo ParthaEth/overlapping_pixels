@@ -4,7 +4,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 
-def get_celeba_data_loaders(batch_size):
+def get_celeba_data_loaders(batch_size, return_testloader=False):
     # Define the transform to preprocess the data
     transform = transforms.Compose([
         transforms.CenterCrop(128),  # Crop the images to 128x128
@@ -22,9 +22,12 @@ def get_celeba_data_loaders(batch_size):
     celeba_test = datasets.CelebA(root=data_root, split='test', target_type='attr', transform=transform, download=False)
 
     # Create DataLoader for training, validation, and test sets
-    train_loader = DataLoader(celeba_train, batch_size=batch_size, shuffle=True)
-    valid_loader = DataLoader(celeba_valid, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(celeba_test, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(celeba_train, batch_size=batch_size, shuffle=True, num_workers=4)
+    valid_loader = DataLoader(celeba_valid, batch_size=batch_size, shuffle=False, num_workers=4)
+    if return_testloader:
+        test_loader = DataLoader(celeba_test, batch_size=batch_size, shuffle=False, num_workers=4)
+    else:
+        test_loader = None
 
     return train_loader, valid_loader, test_loader
 
