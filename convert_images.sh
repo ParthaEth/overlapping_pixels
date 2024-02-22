@@ -1,0 +1,1 @@
+/home/pghosh/miniconda3/envs/H100/bin/python convert_images.py --pid $1
