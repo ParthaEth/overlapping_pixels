@@ -46,6 +46,7 @@ def gaussian_2d_batch(x, y, means, L_params):
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--pid', type=int, required=True, help='Resolution of the images')
 args = argparser.parse_args()
+args.pid += 1265
 
 process_batches_per_job = 2
 start_idx = args.pid * process_batches_per_job * configs.celeba_config.gaussian_pixel.batch_size
@@ -82,6 +83,7 @@ os.makedirs(configs.celeba_config.gaussian_pixel.out_dir, exist_ok=True)
 
 for b_id, (img_batch, img_names) in enumerate(data_loader):
     imgs = img_batch.to(device)
+    batch_size = imgs.shape[0]
     x, y = torch.meshgrid(torch.linspace(0, 1, W, device=device), torch.linspace(0, 1, H, device=device), indexing='ij')
     x, y = x.flatten(), y.flatten()
 
@@ -116,9 +118,9 @@ for b_id, (img_batch, img_names) in enumerate(data_loader):
 
         # Compute the weighted sum of colors for each point
         colors_expanded = colors.unsqueeze(3).expand(-1, -1, -1, H * W)  # Shape: (b, N, 3, H*W)
-        reconstructed = torch.sum(weights.unsqueeze(2) * colors_expanded, dim=1).view(batch_size, 3, H, W)
+        reconstructed = torch.sum(weights.unsqueeze(2) * colors_expanded, dim=1).view(-1, 3, H, W)
 
-        loss = torch.mean((reconstructed - imgs) ** 2)
+        loss = torch.mean((reconstructed[:batch_size] - imgs[:batch_size]) ** 2)
         psnr = 10 * torch.log10((imgs.max() - imgs.min()) / loss)
 
         loss.backward()
@@ -150,7 +152,7 @@ for b_id, (img_batch, img_names) in enumerate(data_loader):
             plt.close()  # Close the figure to free memory
     # Save the obtained gaussian parameters and the colors
     # import ipdb; ipdb.set_trace()
-    for in_b_id in range(colors.shape[0]):
+    for in_b_id in range(batch_size):
         try:
             torch.save({'colors': colors[in_b_id], 'means': means[in_b_id], 'L_params': L_params[in_b_id]},
                        os.path.join(configs.celeba_config.gaussian_pixel.out_dir, f'{img_names[in_b_id]}.pt'))

@@ -31,9 +31,11 @@ class ImageFolderOffsatable(Dataset):
         self.start_offset = start_offset
 
     def __len__(self):
-        return len(self.image_files)
+        return len(self.image_files) - self.start_offset
 
     def __getitem__(self, idx):
+        if idx >= len(self):
+            raise IndexError('Index out of bound')
         img_name = os.path.join(self.image_dir, self.image_files[idx + self.start_offset])
         image = Image.open(img_name).convert('RGB')  # Convert to RGB to ensure 3 channels
 
