@@ -2,18 +2,19 @@ import sys
 sys.path.append('..')
 
 import torch
-from transformers import ViTForImageClassification, ViTFeatureExtractor, ViTConfig
+from transformers import ViTForImageClassification, ViTConfig
 from torchinfo import summary
 from convert_celebA import celeba_loader
 import configs
 import tqdm
 from my_utils.accuracy_comp import multi_label_accuracy
+from vit_classification.vit_gaussian_pixels import vit_with_embedder
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load the feature extractor and model from Hugging Face Transformers
 # feature_extractor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224-in21k')
-feature_extractor = ViTFeatureExtractor(image_size=128, do_resize=False, do_center_crop=False, do_normalize=False)
+# feature_extractor = ViTFeatureExtractor(image_size=128, do_resize=False, do_center_crop=False, do_normalize=False)
 # model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224-in21k')
 # Initialize the ViT configuration tailored for your dataset
 config = ViTConfig(
@@ -38,22 +39,29 @@ config = ViTConfig(
 )
 
 # Initialize the model with the custom configuration
-model = ViTForImageClassification(config).to(device)
+if configs.celeba_config.model_name.lower() == 'vanilla_vit':
+    model = ViTForImageClassification(config).to(device)
+elif configs.celeba_config.model_name.lower() == 'non_uniform_vit':
+    setattr(config, 'num_patches', configs.celeba_config.gaussian_pixel.pix_per_img)
+    model = vit_with_embedder.ViTNonUniformPatches(config).to(device)
+else:
+    raise ValueError(f'Unknown model name: {configs.celeba_config.model_name}, possible values: vanilla_vit, non_uniform_vit')
+
 model_summary = summary(model, input_size=(1, 3, configs.celeba_config.img_size, configs.celeba_config.img_size),
                         verbose=1, device=device)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=configs.celeba_config.vanilla_vit.learning_rate)
+optimizer = torch.optim.Adam(model.parameters(), lr=configs.celeba_config.vit_conf.learning_rate)
 
 # Load an image
-train_loader, valid_loader, _ = celeba_loader.get_celeba_data_loaders(batch_size=configs.batch_size,
-                                                                      return_testloader=False)
+train_loader, valid_loader, _ = celeba_loader.get_celeba_data_loaders(
+    batch_size=configs.celeba_config.vit_conf.batch_size, return_testloader=False)
 loss_criterion = torch.nn.BCEWithLogitsLoss()
 
 valid_accuracy = 0.0
 moving_avg_weight = 0.3
 overfit_batch = False
 is_first_batch = True
-for epoch in range(configs.celeba_config.vanilla_vit.epochs):
+for epoch in range(configs.celeba_config.vit_conf.epochs):
     model.train()  # Set model to training mode
     running_loss = 0.0
     correct_predictions = 0
