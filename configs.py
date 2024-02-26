@@ -41,16 +41,21 @@ class CelebA:
         self.classes = 40
         self.img_size = 128
         self.model_name = model_name
+        self.reconstruct_pixels_from_gaussians = False
+        self.b_size = 64
+        self.dataloader = 'gaussian_pix_loader'  # 'vanilla_celeba_loader'
+        if self.reconstruct_pixels_from_gaussians:
+            assert model_name.lower() == 'vanilla_vit', 'Reconstruction from Gaussians only supported for Vanilla ViT'
         if model_name.lower() == 'vanilla_vit':
-            self.vit_conf = VanillaVit(epochs=50, batch_size=64, learning_rate=0.0001)
+            self.vit_conf = VanillaVit(epochs=50, batch_size=self.b_size, learning_rate=0.0001)
+            self.normalize_mean = True
         elif model_name.lower() == 'non_uniform_vit':
-            self.vit_conf = NonUniformVit(epochs=50, batch_size=64, learning_rate=0.0001)
+            self.vit_conf = NonUniformVit(epochs=50, batch_size=self.b_size, learning_rate=0.0001)
+            self.normalize_mean = False
         else:
             raise ValueError(f'Unknown model name: {model_name}, possible values: vanilla_vit, non_uniform_vit')
 
-        # TODO: Remove the following line and un comment the one after. Temoporary for testing
-        self.gaussian_pixel = GaussianPixel(epochs=10_000, batch_size=80, learning_rate=0.0001, pix_per_img=64)
-        # self.gaussian_pixel = GaussianPixel(epochs=10_000, batch_size=80, learning_rate=0.0001, pix_per_img=400)
+        self.gaussian_pixel = GaussianPixel(epochs=10_000, batch_size=80, learning_rate=0.0001, pix_per_img=400)
         if computer_name == 'oasis':
             self.datapath = '/home/pghosh/repos/datasets/celeba'
             self.visualize = False

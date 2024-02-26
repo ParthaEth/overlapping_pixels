@@ -4,11 +4,12 @@ sys.path.append('..')
 import torch
 from transformers import ViTForImageClassification, ViTConfig
 from torchinfo import summary
-from convert_celebA import celeba_loader
+from convert_celebA import celeba_loader, gaussian_pix_loader
 import configs
 import tqdm
 from my_utils.accuracy_comp import multi_label_accuracy
 from vit_classification.vit_gaussian_pixels import vit_with_embedder
+import convert_images
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -17,11 +18,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # feature_extractor = ViTFeatureExtractor(image_size=128, do_resize=False, do_center_crop=False, do_normalize=False)
 # model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224-in21k')
 # Initialize the ViT configuration tailored for your dataset
-config = ViTConfig(
+vit_config = ViTConfig(
     image_size=configs.celeba_config.img_size,
     patch_size=16,
     num_channels=3,
-    hidden_size=768,
+    hidden_size=192,
     num_hidden_layers=12,
     # num_hidden_layers=2,
     num_attention_heads=12,
@@ -40,27 +41,43 @@ config = ViTConfig(
 
 # Initialize the model with the custom configuration
 if configs.celeba_config.model_name.lower() == 'vanilla_vit':
-    model = ViTForImageClassification(config).to(device)
-elif configs.celeba_config.model_name.lower() == 'non_uniform_vit':
-    setattr(config, 'num_patches', configs.celeba_config.gaussian_pixel.pix_per_img)
-    model = vit_with_embedder.ViTNonUniformPatches(config).to(device)
-else:
-    raise ValueError(f'Unknown model name: {configs.celeba_config.model_name}, possible values: vanilla_vit, non_uniform_vit')
+    model = ViTForImageClassification(vit_config).to(device)
+    input_size = (1, 3, configs.celeba_config.img_size, configs.celeba_config.img_size)
 
-model_summary = summary(model, input_size=(1, 3, configs.celeba_config.img_size, configs.celeba_config.img_size),
-                        verbose=1, device=device)
+elif configs.celeba_config.model_name.lower() == 'non_uniform_vit':
+    setattr(vit_config, 'num_patches', configs.celeba_config.gaussian_pixel.pix_per_img)
+    setattr(vit_config, 'pixel_dim', 8)
+    model = vit_with_embedder.ViTNonUniformPatches(vit_config).to(device)
+    input_size = (1, configs.celeba_config.gaussian_pixel.pix_per_img, 8)
+
+else:
+    raise ValueError(f'Unknown model name: {configs.celeba_config.model_name}, '
+                     f'possible values: vanilla_vit, non_uniform_vit')
+
+if configs.celeba_config.dataloader.lower() == 'gaussian_pix_loader':
+    train_loader, valid_loader, _ = gaussian_pix_loader.get_gp_celba_loaders(
+        batch_size=configs.celeba_config.vit_conf.batch_size, return_test_loader=False,
+        normalize_mean=configs.celeba_config.normalize_mean)
+elif configs.celeba_config.dataloader.lower() == 'vanilla_celeba_loader':
+    train_loader, valid_loader, _ = celeba_loader.get_celeba_data_loaders(
+        batch_size=configs.celeba_config.vit_conf.batch_size, return_testloader=False)
+else:
+    raise ValueError(f'Unknown dataloader name: {configs.celeba_config.dataloader}, '
+                     f'possible values: vanilla_celeba_loader, gaussian_pix_loader')
+
+model_summary = summary(model, input_size=input_size, verbose=1, device=device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=configs.celeba_config.vit_conf.learning_rate)
 
-# Load an image
-train_loader, valid_loader, _ = celeba_loader.get_celeba_data_loaders(
-    batch_size=configs.celeba_config.vit_conf.batch_size, return_testloader=False)
+
 loss_criterion = torch.nn.BCEWithLogitsLoss()
 
 valid_accuracy = 0.0
 moving_avg_weight = 0.3
 overfit_batch = False
 is_first_batch = True
+max_pos = [-9999, -9999]  # format x,y
+min_pos = [9999, 9999]  # format x,y
 for epoch in range(configs.celeba_config.vit_conf.epochs):
     model.train()  # Set model to training mode
     running_loss = 0.0
@@ -69,13 +86,27 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
 
     pbar = tqdm.tqdm(train_loader)
     for imgs_this_batch, labels_this_batch in pbar:
+        if configs.celeba_config.dataloader.lower() == 'gaussian_pix_loader':
+            max_pos[0] = max(imgs_this_batch[:, :, :2][:, :, 0].max().item(), max_pos[0])
+            max_pos[1] = max(imgs_this_batch[:, :, :2][:, :, 1].max().item(), max_pos[1])
+            min_pos[0] = min(imgs_this_batch[:, :, :2][:, :, 0].min().item(), min_pos[0])
+            min_pos[1] = min(imgs_this_batch[:, :, :2][:, :, 1].min().item(), min_pos[1])
+
+
+        imgs_this_batch = imgs_this_batch.to(device)
+        if configs.celeba_config.reconstruct_pixels_from_gaussians:
+            x, y, means = convert_images.x, convert_images.y, imgs_this_batch[:, :, :2]
+            L_params, colors = None, imgs_this_batch[:, :, 5:]
+            cov_mat = imgs_this_batch[:, :, [2, 3, 3, 4]].reshape(-1, imgs_this_batch.shape[1], 2, 2)
+            imgs_this_batch = convert_images.recon_pix_frm_gaus(x, y, means, L_params, cov_mat, colors)
+
         if overfit_batch:
             if is_first_batch:
-                imgs = imgs_this_batch.to(device)
+                imgs = imgs_this_batch
                 labels = labels_this_batch.to(torch.float32).to(device)
                 is_first_batch = False
         else:
-            imgs = imgs_this_batch.to(device)
+            imgs = imgs_this_batch
             labels = labels_this_batch.to(torch.float32).to(device)
 
         # Forward pass
@@ -107,11 +138,18 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
     correct_predictions_val = 0
     total_predictions_val = 0
 
+    print(f'max_pos: {max_pos}, min_pos: {min_pos}')
     with torch.no_grad():
         pbar_valid = tqdm.tqdm(valid_loader, desc="Validation")
         for imgs, labels in pbar_valid:
             imgs = imgs.to(device)
             labels = labels.to(device)
+
+            if configs.celeba_config.reconstruct_pixels_from_gaussians:
+                x, y, means = convert_images.x, convert_images.y, imgs[:, :, :2]
+                L_params, colors = None, imgs[:, :, 5:]
+                cov_mat = imgs[:, :, [2, 3, 3, 4]].reshape(-1, imgs.shape[1], 2, 2)
+                imgs = convert_images.recon_pix_frm_gaus(x, y, means, L_params, cov_mat, colors)
 
             outputs = model(imgs)
             logits = outputs.logits
