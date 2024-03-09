@@ -1,4 +1,6 @@
 import os
+
+import ipdb
 import torch
 import torch.optim as optim
 import numpy as np
@@ -8,6 +10,14 @@ import tqdm
 import configs
 from convert_celebA import celeba_loader
 import argparse
+
+
+def regularize_to_range(means, min_val, max_val):
+    '''means: [batch_size, N, 2]
+       return regularization loss
+       keep means between min - max'''
+    loss = torch.relu(means - max_val).sum() + torch.relu(-means + min_val).sum()
+    return loss
 
 
 def gaussian_2d_batch(x, y, means, L_params, cov_mat):
@@ -30,10 +40,10 @@ def gaussian_2d_batch(x, y, means, L_params, cov_mat):
     if cov_mat is None:
         L = torch.tril(L_params)
         L.diagonal(dim1=-2, dim2=-1).exp_()
-        inv_L = torch.inverse(L)  # Shape: [batch_size, N, 2, 2]
-        inv_cov = torch.matmul(inv_L, inv_L.transpose(-2, -1))  # Shape: [batch_size, N, 2, 2]
+        inv_L = torch.inverse(L + torch.eye(2, device=L.device)*1e-6)  # Shape: [batch_size, N, 2, 2]
+        inv_cov = torch.matmul(inv_L.transpose(-2, -1), inv_L)  # Shape: [batch_size, N, 2, 2]
     else:
-        inv_cov = torch.inverse(cov_mat)
+        inv_cov = torch.inverse(cov_mat + torch.eye(2, device=cov_mat.device)*1e-6)
 
     # Compute the squared Mahalanobis distance for each point and each Gaussian
     mahalanobis_dist = (inv_cov[:, :, 0, 0].unsqueeze(1) * diff_x ** 2 +
@@ -59,18 +69,20 @@ def recon_pix_frm_gaus(x, y, means, L_params, cov_mat, colors):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 res = configs.celeba_config.img_size
 H, W = res, res
-x, y = torch.meshgrid(torch.linspace(0, 1, W, device=device), torch.linspace(0, 1, H, device=device), indexing='ij')
-x, y = x.flatten(), y.flatten()
+normalizex_pix_x, normalized_px_y = torch.meshgrid(torch.linspace(0, 1, W, device=device),
+                                                   torch.linspace(0, 1, H, device=device), indexing='ij')
+normalizex_pix_x, normalized_px_y = normalizex_pix_x.flatten(), normalized_px_y.flatten()
 
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--pid', type=int, required=True, help='Resolution of the images')
     args = argparser.parse_args()
-    args.pid += 1265
+    offset = 0
 
     process_batches_per_job = 2
-    start_idx = args.pid * process_batches_per_job * configs.celeba_config.gaussian_pixel.batch_size
+    # process_batches_per_job = 1
+    start_idx = args.pid * process_batches_per_job * configs.celeba_config.gaussian_pixel.batch_size + offset
 
     print(f'processing from {start_idx} to {start_idx + process_batches_per_job * configs.celeba_config.gaussian_pixel.batch_size -1}')
     # Define batch size, image resolution (H, W), and number of Gaussians (N)
@@ -95,12 +107,15 @@ if __name__ == '__main__':
     data_loader = celeba_loader.get_offsatable_data_loader(batch_size, start_idx)
     os.makedirs(configs.celeba_config.gaussian_pixel.out_dir, exist_ok=True)
 
+    vis_out_dir = f'results/celeba/{res}X{res}/{N}_gaus/'
+    os.makedirs(vis_out_dir, exist_ok=True)
+
+    best_psnr = -999
+
     for b_id, (img_batch, img_names) in enumerate(data_loader):
         imgs = img_batch.to(device)
         batch_size = imgs.shape[0]
-
-        out_dir = f'results/celeba/{res}X{res}/{N}_gaus/'
-        os.makedirs(out_dir, exist_ok=True)
+        # import ipdb; ipdb.set_trace()
 
         with torch.no_grad():
             radius = max(1, int(np.exp(log_sigma) * max(W, H) / 2))
@@ -125,11 +140,25 @@ if __name__ == '__main__':
         for step in pbar:
             optimizer.zero_grad()
 
+            # Compute covariance mat
+            L = torch.tril(L_params)
+            L.diagonal(dim1=-2, dim2=-1).exp_()
+            cov = torch.matmul(L, L.transpose(-2, -1))
+
             # Parallel computation of weights for all Gaussians
-            reconstructed = recon_pix_frm_gaus(x, y, means, L_params, colors)
+            reconstructed = recon_pix_frm_gaus(normalizex_pix_x, normalized_px_y, means, None, cov, colors)
 
             loss = torch.mean((reconstructed[:batch_size] - imgs[:batch_size]) ** 2)
+            loss = loss + regularize_to_range(means, 0, 1) + regularize_to_range(colors, -1, 1) + \
+                   regularize_to_range(cov, -2, 2)
             psnr = 10 * torch.log10((imgs.max() - imgs.min()) / loss)
+
+            if psnr > best_psnr:
+                best_psnr = psnr
+                best_means = means
+                best_colors = colors
+                best_cov = cov
+                best_L_params = L_params
 
             loss.backward()
             optimizer.step()
@@ -156,16 +185,16 @@ if __name__ == '__main__':
                 plt.title('Reconstructed Image')
                 plt.axis('off')
 
-                plt.savefig(os.path.join(out_dir, f'step_{step}_psnr_{psnr.item():.4f}.png'))
+                plt.savefig(os.path.join(vis_out_dir, f'step_{step}_psnr_{psnr.item():.4f}.png'))
                 plt.close()  # Close the figure to free memory
         # Save the obtained gaussian parameters and the colors
         # import ipdb; ipdb.set_trace()
         for in_b_id in range(batch_size):
             try:
-                torch.save({'colors': colors[in_b_id], 'means': means[in_b_id], 'L_params': L_params[in_b_id]},
+                torch.save({'colors': best_colors[in_b_id], 'means': best_means[in_b_id], 'L_params': best_L_params[in_b_id]},
                            os.path.join(configs.celeba_config.gaussian_pixel.out_dir, f'{img_names[in_b_id]}.pt'))
             except KeyboardInterrupt as e:
-                torch.save({'colors': colors[in_b_id], 'means': means[in_b_id], 'L_params': L_params[in_b_id]},
+                torch.save({'colors': best_colors[in_b_id], 'means': best_means[in_b_id], 'L_params': best_L_params[in_b_id]},
                            os.path.join(configs.celeba_config.gaussian_pixel.out_dir, f'{img_names[in_b_id]}.pt'))
                 break
 

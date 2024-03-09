@@ -22,7 +22,7 @@ vit_config = ViTConfig(
     image_size=configs.celeba_config.img_size,
     patch_size=16,
     num_channels=3,
-    hidden_size=192,
+    hidden_size=384,
     num_hidden_layers=12,
     # num_hidden_layers=2,
     num_attention_heads=12,
@@ -57,7 +57,7 @@ else:
 if configs.celeba_config.dataloader.lower() == 'gaussian_pix_loader':
     train_loader, valid_loader, _ = gaussian_pix_loader.get_gp_celba_loaders(
         batch_size=configs.celeba_config.vit_conf.batch_size, return_test_loader=False,
-        normalize_mean=configs.celeba_config.normalize_mean)
+        normalize_gaus_params=configs.celeba_config.normalize_gaus_params)
 elif configs.celeba_config.dataloader.lower() == 'vanilla_celeba_loader':
     train_loader, valid_loader, _ = celeba_loader.get_celeba_data_loaders(
         batch_size=configs.celeba_config.vit_conf.batch_size, return_testloader=False)
@@ -76,8 +76,8 @@ valid_accuracy = 0.0
 moving_avg_weight = 0.3
 overfit_batch = False
 is_first_batch = True
-max_pos = [-9999, -9999]  # format x,y
-min_pos = [9999, 9999]  # format x,y
+max_feature = torch.ones((1, 8), device=device) * (-999)  # format mean_x, mean_y, 3 covar, color
+min_feature = torch.ones((1, 8), device=device) * 999  # format mean_x, mean_y, 3 covar, color
 for epoch in range(configs.celeba_config.vit_conf.epochs):
     model.train()  # Set model to training mode
     running_loss = 0.0
@@ -86,16 +86,15 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
 
     pbar = tqdm.tqdm(train_loader)
     for imgs_this_batch, labels_this_batch in pbar:
-        if configs.celeba_config.dataloader.lower() == 'gaussian_pix_loader':
-            max_pos[0] = max(imgs_this_batch[:, :, :2][:, :, 0].max().item(), max_pos[0])
-            max_pos[1] = max(imgs_this_batch[:, :, :2][:, :, 1].max().item(), max_pos[1])
-            min_pos[0] = min(imgs_this_batch[:, :, :2][:, :, 0].min().item(), min_pos[0])
-            min_pos[1] = min(imgs_this_batch[:, :, :2][:, :, 1].min().item(), min_pos[1])
-
-
         imgs_this_batch = imgs_this_batch.to(device)
+
+        if configs.celeba_config.dataloader.lower() == 'gaussian_pix_loader':
+            # import ipdb; ipdb.set_trace()
+            max_feature = torch.concat([max_feature, imgs_this_batch.view((-1, 8))], dim=0).max(dim=0).values[None, ...]
+            min_feature = torch.concat([min_feature, imgs_this_batch.view((-1, 8))], dim=0).min(dim=0).values[None, ...]
+
         if configs.celeba_config.reconstruct_pixels_from_gaussians:
-            x, y, means = convert_images.x, convert_images.y, imgs_this_batch[:, :, :2]
+            x, y, means = convert_images.normalizex_pix_x, convert_images.normalized_px_y, imgs_this_batch[:, :, :2]
             L_params, colors = None, imgs_this_batch[:, :, 5:]
             cov_mat = imgs_this_batch[:, :, [2, 3, 3, 4]].reshape(-1, imgs_this_batch.shape[1], 2, 2)
             imgs_this_batch = convert_images.recon_pix_frm_gaus(x, y, means, L_params, cov_mat, colors)
@@ -138,7 +137,7 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
     correct_predictions_val = 0
     total_predictions_val = 0
 
-    print(f'max_pos: {max_pos}, min_pos: {min_pos}')
+    print(f'max: {max_feature}, mins: {min_feature}')
     with torch.no_grad():
         pbar_valid = tqdm.tqdm(valid_loader, desc="Validation")
         for imgs, labels in pbar_valid:
@@ -146,7 +145,7 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
             labels = labels.to(device)
 
             if configs.celeba_config.reconstruct_pixels_from_gaussians:
-                x, y, means = convert_images.x, convert_images.y, imgs[:, :, :2]
+                x, y, means = convert_images.normalizex_pix_x, convert_images.normalized_px_y, imgs[:, :, :2]
                 L_params, colors = None, imgs[:, :, 5:]
                 cov_mat = imgs[:, :, [2, 3, 3, 4]].reshape(-1, imgs.shape[1], 2, 2)
                 imgs = convert_images.recon_pix_frm_gaus(x, y, means, L_params, cov_mat, colors)

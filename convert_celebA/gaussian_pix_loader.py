@@ -15,7 +15,7 @@ CSV = namedtuple("CSV", ["header", "index", "data"])
 
 
 class GaussianPixelDataset(Dataset):
-    def __init__(self, root_dir, split, normalize_mean=False):
+    def __init__(self, root_dir, split, normalize_gaus_params=False):
         """
         Args:
             gaussian_pix_dir (string): Directory with all the .pt files.
@@ -26,9 +26,13 @@ class GaussianPixelDataset(Dataset):
             "test": 2,
             "all": None,
         }
-        self.normalize_mean = normalize_mean
-        self.max_pos = torch.tensor([2.5512356758117676, 2.7300338745117188])
-        self.min_pos = torch.tensor([-1.637588620185852, -1.1793944835662842])
+        self.normalize_gaus_params = normalize_gaus_params
+        # mean_x, mean_y, covar_xx, covar_xy, covar_yy, r, g, b
+        self.max_feat = torch.tensor([2.5512, 2.7300, 1609.8877, 23.1062, 715.4991, 8.3924, 8.2861, 8.2866])
+        self.min_feat = torch.tensor([-1.6376e+00, -1.1794e+00, 2.2462e-09, -1.6270e+01, 5.0072e-07, -9.8935e+00, -9.1950e+00, -9.2017e+00])
+        self.feat_trunc = 5
+        self.max_feat = torch.clip(self.max_feat, -self.feat_trunc, self.feat_trunc)
+        self.min_feat = torch.clip(self.min_feat, -self.feat_trunc, self.feat_trunc)
         self.root = root_dir
         self.base_folder = 'celeba'
         self.gaussian_pix_dir = os.path.join(self.root, 'gps')
@@ -89,25 +93,26 @@ class GaussianPixelDataset(Dataset):
     def __getitem__(self, idx):
         file_path = os.path.join(self.gaussian_pix_dir, self.filenames_this_split[idx])
         data = torch.load(file_path, map_location=torch.device('cpu'))
-        if self.normalize_mean:
-            mean = ((data['means'] - self.min_pos)/(self.max_pos - self.min_pos) - 0.5) * 2
-        else:
-            mean = data['means']
 
         # Concatenate cvar from L_params
         L = torch.tril(data['L_params'])
         L.diagonal(dim1=-2, dim2=-1).exp_()
 
-        covar = (L@L.transpose(1,2)).reshape(-1, 4)[:, (0, 1, 3)]
-        vector = torch.cat([mean, covar, data['colors']], dim=1)
+        covar = (L@L.transpose(1, 2)).reshape(-1, 4)[:, (0, 1, 3)]
+        vector = torch.cat([data['means'], covar, data['colors']], dim=1)
+
+        if self.normalize_gaus_params:
+            vector = (torch.clip(vector, -self.feat_trunc, self.feat_trunc) - self.min_feat) \
+                     / (self.max_feat - self.min_feat)
+            vector = (vector - 0.5 ) * 2
 
         return vector, self.attr[idx]
 
 
-def get_gp_celba_loaders(batch_size, return_test_loader=False, normalize_mean=False):
+def get_gp_celba_loaders(batch_size, return_test_loader=False, normalize_gaus_params=False):
     data_root = configs.celeba_config.datapath
-    train_set = GaussianPixelDataset(root_dir=data_root, split='train', normalize_mean=normalize_mean)
-    validation_set = GaussianPixelDataset(root_dir=data_root, split='valid', normalize_mean=normalize_mean)
+    train_set = GaussianPixelDataset(root_dir=data_root, split='train', normalize_gaus_params=normalize_gaus_params)
+    validation_set = GaussianPixelDataset(root_dir=data_root, split='valid', normalize_gaus_params=normalize_gaus_params)
     if return_test_loader:
         test_set = GaussianPixelDataset(root_dir=data_root, split='test')
         test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -123,7 +128,7 @@ def get_gp_celba_loaders(batch_size, return_test_loader=False, normalize_mean=Fa
 if __name__ == '__main__':
     # Example usage
     data_dir = '/home/pghosh/repos/datasets/celeba/'  # Replace with your actual data directory path
-    dataset = GaussianPixelDataset(root_dir=data_dir, split='train', normalize_mean=True)
+    dataset = GaussianPixelDataset(root_dir=data_dir, split='train', normalize_gaus_params=False)
     data_loader = DataLoader(dataset, batch_size=10, shuffle=True, num_workers=4)
 
     # Example of iterating over the DataLoader
