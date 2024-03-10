@@ -1,15 +1,18 @@
+import os.path
 import sys
 sys.path.append('..')
 
+import numpy as np
 import torch
 from transformers import ViTForImageClassification, ViTConfig
 from torchinfo import summary
 from convert_celebA import celeba_loader, gaussian_pix_loader
 import configs
 import tqdm
-from my_utils.accuracy_comp import multi_label_accuracy
+from my_utils.accuracy_comp import multi_label_accuracy, per_class_accuracy
 from vit_classification.vit_gaussian_pixels import vit_with_embedder
 import convert_images
+import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,6 +26,7 @@ vit_config = ViTConfig(
     patch_size=16,
     num_channels=3,
     hidden_size=384,
+    # hidden_size=768,
     num_hidden_layers=12,
     # num_hidden_layers=2,
     num_attention_heads=12,
@@ -86,6 +90,7 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
 
     pbar = tqdm.tqdm(train_loader)
     for imgs_this_batch, labels_this_batch in pbar:
+        # break
         imgs_this_batch = imgs_this_batch.to(device)
 
         if configs.celeba_config.dataloader.lower() == 'gaussian_pix_loader':
@@ -111,6 +116,7 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
         # Forward pass
         outputs = model(imgs)
         logits = outputs.logits
+
         loss = loss_criterion(logits, labels)
 
         # Backward pass and optimize
@@ -132,12 +138,17 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
         pbar.set_description(f"Epoch: {epoch + 1}, Loss: {running_loss/total_predictions:0.4f}, Batch Train Acc: {train_accuracy:.4f}, "
                              f"Val Acc: {valid_accuracy:.4f}")
 
+    # import ipdb;
+    # ipdb.set_trace()
     # Validation loop, set model to evaluation mode
     model.eval()
     correct_predictions_val = 0
     total_predictions_val = 0
 
     print(f'max: {max_feature}, mins: {min_feature}')
+    num_classes = 40  # Adjust as per your dataset
+    correct_predictions_per_class = np.zeros(num_classes)
+    total_predictions_per_class = np.zeros(num_classes)
     with torch.no_grad():
         pbar_valid = tqdm.tqdm(valid_loader, desc="Validation")
         for imgs, labels in pbar_valid:
@@ -153,11 +164,35 @@ for epoch in range(configs.celeba_config.vit_conf.epochs):
             outputs = model(imgs)
             logits = outputs.logits
 
+            # per class accuracy
+            correct_per_class, total_per_class = per_class_accuracy(logits, labels)
+            correct_predictions_per_class += correct_per_class.cpu().numpy()
+            total_predictions_per_class += total_per_class
+
             # Calculate accuracy
             total_predictions_val += labels.size(0)
             correct_predictions_val += (multi_label_accuracy(logits, labels).item() * labels.size(0))
 
     valid_accuracy = correct_predictions_val / total_predictions_val
 
+    per_class_acc = correct_predictions_per_class / total_predictions_per_class
+    class_labels = ['5_o_Clock_Shadow', 'Arched_Eyebrows', 'Attractive', 'Bags_Under_Eyes', 'Bald', 'Bangs',
+                    'Big_Lips', 'Big_Nose', 'Black_Hair', 'Blond_Hair', 'Blurry', 'Brown_Hair', 'Bushy_Eyebrows',
+                    'Chubby', 'Double_Chin', 'Eyeglasses', 'Goatee', 'Gray_Hair', 'Heavy_Makeup', 'High_Cheekbones',
+                    'Male', 'Mouth_Slightly_Open', 'Mustache', 'Narrow_Eyes', 'No_Beard', 'Oval_Face', 'Pale_Skin',
+                    'Pointy_Nose', 'Receding_Hairline', 'Rosy_Cheeks', 'Sideburns', 'Smiling', 'Straight_Hair',
+                    'Wavy_Hair', 'Wearing_Earrings', 'Wearing_Hat', 'Wearing_Lipstick', 'Wearing_Necklace',
+                    'Wearing_Necktie', 'Young']
+
+    # Plot per-class accuracy
+    plt.figure(figsize=(20, 15))
+    plt.bar(class_labels, per_class_acc)
+    plt.xlabel('Class')
+    plt.ylabel('Accuracy')
+    plt.title('Validation Accuracy per Class on CelebA Dataset')
+    plt.xticks(rotation=90)
+    plt.savefig(f'../results/celeba/128X128/400_gaus/per_class_validation_accuracy_{epoch}.png')
+
     # Print epoch-level summary
     print(f"Train Acc: {train_accuracy:.4f}, Val Acc: {valid_accuracy:.4f}")
+    # exit(0)

@@ -20,7 +20,7 @@ class ViTEmbeddingsGaussianPixels(nn.Module):
         # self.patch_embeddings = ViTPatchEmbeddings(config)  # todo: Remove this line
         num_patches = config.num_patches
         if num_patches > 2048*2048:
-            raise ValueError(f'num_patches should be less than or equal to 256*256, else define a larger pos '
+            raise ValueError(f'num_patches should be less than or equal to 2048*2048, else define a larger pos '
                              f'embeding param below')
         self.position_embeddings = nn.Parameter(torch.randn(1, config.pixel_dim, 256, 256))
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -54,10 +54,11 @@ class ViTEmbeddingsGaussianPixels(nn.Module):
             mode='bilinear', align_corners=True)
 
         # import ipdb; ipdb.set_trace()
+        mask = torch.tensor([[[0, 0, 1, 1, 1, 1, 1, 1]]], device=embeddings.device, dtype=torch.float32)
         positional_embedding = positional_embedding.squeeze(-1).permute(0, 2, 1)
 
         # add positional encoding to each token
-        embeddings = embeddings + positional_embedding
+        embeddings = embeddings * mask + positional_embedding * (1 - mask)
         embeddings = embeddings.reshape(batch_size, n_pix // self.pix_perword, -1)
         embeddings = self.proj(embeddings)
 

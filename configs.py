@@ -46,13 +46,14 @@ class CelebA:
         self.reconstruct_pixels_from_gaussians = False
         self.b_size = 64
         self.dataloader = 'gaussian_pix_loader'  # 'vanilla_celeba_loader'
+        # self.dataloader = 'vanilla_celeba_loader'
         if self.reconstruct_pixels_from_gaussians:
             assert model_name.lower() == 'vanilla_vit', 'Reconstruction from Gaussians only supported for Vanilla ViT'
         if model_name.lower() == 'vanilla_vit':
             self.vit_conf = VanillaVit(epochs=50, batch_size=self.b_size, learning_rate=0.0001)
             self.normalize_gaus_params = False
         elif model_name.lower() == 'non_uniform_vit':
-            self.vit_conf = NonUniformVit(epochs=50, batch_size=self.b_size, learning_rate=0.001)
+            self.vit_conf = NonUniformVit(epochs=50, batch_size=self.b_size, learning_rate=0.00001)
             self.normalize_gaus_params = False
         else:
             raise ValueError(f'Unknown model name: {model_name}, possible values: vanilla_vit, non_uniform_vit')

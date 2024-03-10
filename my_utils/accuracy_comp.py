@@ -29,6 +29,31 @@ def multi_label_accuracy(outputs_logits, labels, threshold=0.5):
     return accuracy
 
 
+def per_class_accuracy(outputs_logits, labels, threshold=0.5):
+    """
+    Compute per-class accuracy for multi-label classification.
+
+    Parameters:
+    - outputs_logits: Tensor of model logits.
+    - labels: Tensor of ground truth labels.
+    - threshold: Threshold for converting logits to binary predictions.
+
+    Returns:
+    - correct_predictions_per_class: Number of correct predictions per class.
+    - total_predictions_per_class: Total number of predictions per class.
+    """
+    if labels.dtype == torch.float32:
+        labels = (labels > 0.9).int()
+
+    # Apply sigmoid and threshold
+    preds = (torch.sigmoid(outputs_logits) > threshold).int()
+
+    # Calculate correct predictions per class
+    correct_predictions = (preds == labels).float()
+
+    return correct_predictions.sum(dim=0), labels.size(0)
+
+
 if __name__ == "__main__":
     # Example usage
     # Create random logits and labels

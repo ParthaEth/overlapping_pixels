@@ -35,7 +35,8 @@ class GaussianPixelDataset(Dataset):
         self.min_feat = torch.clip(self.min_feat, -self.feat_trunc, self.feat_trunc)
         self.root = root_dir
         self.base_folder = 'celeba'
-        self.gaussian_pix_dir = os.path.join(self.root, 'gps')
+        # self.gaussian_pix_dir = os.path.join(self.root, 'gps')
+        self.gaussian_pix_dir = os.path.join(self.root, 'gps_constrained')
         self.all_file_names = [f for f in sorted(os.listdir(self.gaussian_pix_dir)) if f.endswith('.pt')]
         attr = self._load_csv("list_attr_celeba.txt", header=1)
         # map from {-1, 1} to {0, 1}
@@ -94,12 +95,34 @@ class GaussianPixelDataset(Dataset):
         file_path = os.path.join(self.gaussian_pix_dir, self.filenames_this_split[idx])
         data = torch.load(file_path, map_location=torch.device('cpu'))
 
+        means_in_pm_1 = data['means'] * 2 - 1
+
         # Concatenate cvar from L_params
         L = torch.tril(data['L_params'])
         L.diagonal(dim1=-2, dim2=-1).exp_()
 
-        covar = (L@L.transpose(1, 2)).reshape(-1, 4)[:, (0, 1, 3)]
-        vector = torch.cat([data['means'], covar, data['colors']], dim=1)
+        covar = (L@L.transpose(1, 2))# zeroing this feature out to see if that effects accuracy
+
+        # Compute the eigenvalues and eigenvectors for each covariance matrix
+        vals, vecs = torch.linalg.eigh(covar + torch.eye(2, device=covar.device)*1e-6)
+
+        # Sort the eigenvalues and eigenvectors in descending order for each matrix in the batch
+        order = torch.argsort(vals, dim=-1, descending=True)
+
+        # Use advanced indexing to sort the eigenvalues and eigenvectors
+        order_expanded = order.unsqueeze(-1).expand(-1, -1, 2)
+        vals = torch.gather(vals, -1, order)
+        vecs = torch.gather(vecs, -2, order_expanded)
+
+        # Calculate the angles in degrees for each matrix in the batch
+        theta = torch.atan2(vecs[:, 1, 0], vecs[:, 0, 0]).unsqueeze(-1)
+
+        # Calculate the width and height of the ellipse from eigenvalues for each matrix in the batch
+        width_height = 2 * torch.sqrt(vals)
+
+        # inv_co_var = torch.inverse(covar + torch.eye(2, device=covar.device)*1e-6)
+        vector = torch.cat([means_in_pm_1, width_height, theta, data['colors']], dim=1)
+        # vector = torch.cat([data['means'], inv_co_var.reshape(-1, 4)[:, (0, 1, 3)], data['colors']], dim=1)
 
         if self.normalize_gaus_params:
             vector = (torch.clip(vector, -self.feat_trunc, self.feat_trunc) - self.min_feat) \

@@ -60,6 +60,7 @@ if __name__ == "__main__":
     colors_normalized = colors - colors.min()
     colors_normalized = colors_normalized / colors_normalized.max()
     means = data['means'][None, ...]
+    # L_params = data['L_params'][None, ...] * 0 - torch.eye(2, device=colors.device) * 3.5
     L_params = data['L_params'][None, ...]
     plot_gaussians(means, L_params, colors_normalized)
 
@@ -67,9 +68,26 @@ if __name__ == "__main__":
     L.diagonal(dim1=-2, dim2=-1).exp_()
     cov = torch.matmul(L, L.transpose(-2, -1))
 
+    # # Compute the eigenvalues and eigenvectors for each covariance matrix
+    # vals, vecs = torch.linalg.eigh(cov)
+    #
+    # # Sort the eigenvalues and eigenvectors in descending order for each matrix in the batch
+    # order = torch.argsort(vals, dim=-1, descending=True)
+    #
+    # # Use advanced indexing to sort the eigenvalues and eigenvectors
+    # order_expanded = order.unsqueeze(-1).expand(-1, -1, -1, 2)
+    # vals = torch.gather(vals, -1, order)
+    # vecs = torch.gather(vecs, -2, order_expanded)
+    #
+    # # Calculate the angles in degrees for each matrix in the batch
+    # theta = torch.rad2deg(torch.atan2(vecs[:, :, 1, 0], vecs[:, :, 0, 0]))
+    #
+    # # Calculate the width and height of the ellipse from eigenvalues for each matrix in the batch
+    # width_height = 2 * torch.sqrt(vals)
+
     from convert_images import recon_pix_frm_gaus, normalized_px_y, normalizex_pix_x
-    # reconstructed = recon_pix_frm_gaus(normalizex_pix_x, normalized_px_y, means, None, cov, colors)
-    reconstructed = recon_pix_frm_gaus(normalizex_pix_x, normalized_px_y, means, L_params, None, colors)
+    reconstructed = recon_pix_frm_gaus(normalizex_pix_x, normalized_px_y, means, None, cov, colors)
+    # reconstructed = recon_pix_frm_gaus(normalizex_pix_x, normalized_px_y, means, L_params, None, colors)
     reco_img = ((reconstructed[0].detach() + 1) / 2).cpu().clamp(0, 1).permute(1, 2, 0).numpy()
     plt.imshow(reco_img)
     plt.show()
