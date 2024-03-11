@@ -60,8 +60,8 @@ def get_celeba_data_loaders(batch_size, return_testloader=False):
     celeba_test = datasets.CelebA(root=data_root, split='test', target_type='attr', transform=celeba_transform, download=False)
 
     # Create DataLoader for training, validation, and test sets
-    train_loader = DataLoader(celeba_train, batch_size=batch_size, shuffle=True, num_workers=4)
-    valid_loader = DataLoader(celeba_valid, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(celeba_train, batch_size=batch_size, shuffle=True, num_workers=8)
+    valid_loader = DataLoader(celeba_valid, batch_size=batch_size, shuffle=False, num_workers=8)
     if return_testloader:
         test_loader = DataLoader(celeba_test, batch_size=batch_size, shuffle=False, num_workers=4)
     else:

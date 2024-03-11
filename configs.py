@@ -43,6 +43,7 @@ class CelebA:
         self.classes = 40
         self.img_size = 128
         self.model_name = model_name
+        # self.reconstruct_pixels_from_gaussians = True
         self.reconstruct_pixels_from_gaussians = False
         self.b_size = 64
         self.dataloader = 'gaussian_pix_loader'  # 'vanilla_celeba_loader'

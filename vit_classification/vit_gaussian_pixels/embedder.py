@@ -11,7 +11,7 @@ class ViTEmbeddingsGaussianPixels(nn.Module):
     Construct the CLS token, position and patch embeddings. Optionally, also the mask token.
     """
 
-    def __init__(self, config: ViTConfig, use_mask_token: bool = False, pix_perword=1) -> None:
+    def __init__(self, config: ViTConfig, use_mask_token: bool = False, pix_perword=5) -> None:
         super().__init__()
 
         self.cls_token = nn.Parameter(torch.randn(1, 1, config.hidden_size))
@@ -22,7 +22,7 @@ class ViTEmbeddingsGaussianPixels(nn.Module):
         if num_patches > 2048*2048:
             raise ValueError(f'num_patches should be less than or equal to 2048*2048, else define a larger pos '
                              f'embeding param below')
-        self.position_embeddings = nn.Parameter(torch.randn(1, config.pixel_dim, 256, 256))
+        self.position_embeddings = nn.Parameter(torch.randn(1, config.pixel_dim, 64, 64))
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.config = config
         self.pix_perword = pix_perword

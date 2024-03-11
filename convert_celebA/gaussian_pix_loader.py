@@ -10,6 +10,7 @@ import configs
 from collections import namedtuple
 import tqdm
 from torch.utils.data import Dataset, DataLoader
+from convert_celebA.extract_patches import create_exclusive_patches
 
 CSV = namedtuple("CSV", ["header", "index", "data"])
 
@@ -98,7 +99,7 @@ class GaussianPixelDataset(Dataset):
         means_in_pm_1 = data['means'] * 2 - 1
 
         # Concatenate cvar from L_params
-        L = torch.tril(data['L_params'])
+        L = torch.tril(data['L_params'] * 0 - torch.eye(2, device=torch.device('cpu')) * 5)
         L.diagonal(dim1=-2, dim2=-1).exp_()
 
         covar = (L@L.transpose(1, 2))# zeroing this feature out to see if that effects accuracy
@@ -120,9 +121,10 @@ class GaussianPixelDataset(Dataset):
         # Calculate the width and height of the ellipse from eigenvalues for each matrix in the batch
         width_height = 2 * torch.sqrt(vals)
 
-        # inv_co_var = torch.inverse(covar + torch.eye(2, device=covar.device)*1e-6)
+        # # inv_co_var = torch.inverse(covar + torch.eye(2, device=covar.device)*1e-6)
         vector = torch.cat([means_in_pm_1, width_height, theta, data['colors']], dim=1)
-        # vector = torch.cat([data['means'], inv_co_var.reshape(-1, 4)[:, (0, 1, 3)], data['colors']], dim=1)
+        vector = create_exclusive_patches(vector, patch_size=5)
+        # vector = torch.cat([data['means'], covar.reshape(-1, 4)[:, (0, 1, 3)], data['colors']], dim=1)
 
         if self.normalize_gaus_params:
             vector = (torch.clip(vector, -self.feat_trunc, self.feat_trunc) - self.min_feat) \
@@ -142,8 +144,8 @@ def get_gp_celba_loaders(batch_size, return_test_loader=False, normalize_gaus_pa
     else:
         test_loader = None
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4)
-    valid_loader = DataLoader(validation_set, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=8)
+    valid_loader = DataLoader(validation_set, batch_size=batch_size, shuffle=False, num_workers=8)
 
     return train_loader, valid_loader, test_loader
 
