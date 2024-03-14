@@ -51,7 +51,7 @@ class ViTEmbeddingsGaussianPixels(nn.Module):
         positional_embedding = torch.nn.functional.grid_sample(
             self.position_embeddings.expand(batch_size, -1, -1, -1),
             embeddings[:, :, None, :2],
-            mode='bilinear', align_corners=True)
+            mode='nearest', align_corners=True)
 
         # import ipdb; ipdb.set_trace()
         mask = torch.tensor([[[0, 0, 1, 1, 1, 1, 1, 1]]], device=embeddings.device, dtype=torch.float32)

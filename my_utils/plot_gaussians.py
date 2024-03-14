@@ -59,8 +59,9 @@ if __name__ == "__main__":
     colors = data['colors'][None, ...]
     colors_normalized = colors - colors.min()
     colors_normalized = colors_normalized / colors_normalized.max()
-    means = data['means'][None, ...]
-    L_params = data['L_params'][None, ...] * 0 - torch.eye(2, device=colors.device) * 5
+    means = torch.floor(data['means'][None, ...] * 32)/32
+    # means = torch.floor(data['means'][None, ...])
+    L_params = data['L_params'][None, ...]
     # L_params = data['L_params'][None, ...]
     # plot_gaussians(means, L_params, colors_normalized)
 

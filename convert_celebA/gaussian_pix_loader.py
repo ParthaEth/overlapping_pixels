@@ -1,3 +1,4 @@
+import shutil
 import sys
 
 import numpy as np
@@ -16,7 +17,7 @@ CSV = namedtuple("CSV", ["header", "index", "data"])
 
 
 class GaussianPixelDataset(Dataset):
-    def __init__(self, root_dir, split, normalize_gaus_params=False):
+    def __init__(self, root_dir, split, normalize_gaus_params=False, cache_path='/dev/shm'):
         """
         Args:
             gaussian_pix_dir (string): Directory with all the .pt files.
@@ -27,6 +28,7 @@ class GaussianPixelDataset(Dataset):
             "test": 2,
             "all": None,
         }
+        self.cache_path = cache_path
         self.normalize_gaus_params = normalize_gaus_params
         # mean_x, mean_y, covar_xx, covar_xy, covar_yy, r, g, b
         self.max_feat = torch.tensor([2.5512, 2.7300, 1609.8877, 23.1062, 715.4991, 8.3924, 8.2861, 8.2866])
@@ -93,13 +95,20 @@ class GaussianPixelDataset(Dataset):
 
     @torch.no_grad()
     def __getitem__(self, idx):
-        file_path = os.path.join(self.gaussian_pix_dir, self.filenames_this_split[idx])
-        data = torch.load(file_path, map_location=torch.device('cpu'))
+        if self.cache_path:
+            cache_file_path = os.path.join(self.cache_path, self.filenames_this_split[idx])
+            if os.path.exists(cache_file_path):
+                data = torch.load(cache_file_path, map_location=torch.device('cpu'))
+            else:
+                file_path = os.path.join(self.gaussian_pix_dir, self.filenames_this_split[idx])
+                data = torch.load(file_path, map_location=torch.device('cpu'))
+                shutil.copy(file_path, cache_file_path)
 
-        means_in_pm_1 = data['means'] * 2 - 1
+        means_in_pm_1 = data['means'] * 2 - 1 + torch.clip(torch.randn(data['means'].shape) * (1/64), -2/64, 2/64)
 
         # Concatenate cvar from L_params
-        L = torch.tril(data['L_params'] * 0 - torch.eye(2, device=torch.device('cpu')) * 5)
+        # L = torch.tril(data['L_params'] * 0 - torch.eye(2, device=torch.device('cpu')) * 5)
+        L = torch.tril(data['L_params'])
         L.diagonal(dim1=-2, dim2=-1).exp_()
 
         covar = (L@L.transpose(1, 2))# zeroing this feature out to see if that effects accuracy
@@ -144,8 +153,8 @@ def get_gp_celba_loaders(batch_size, return_test_loader=False, normalize_gaus_pa
     else:
         test_loader = None
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=8)
-    valid_loader = DataLoader(validation_set, batch_size=batch_size, shuffle=False, num_workers=8)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    valid_loader = DataLoader(validation_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     return train_loader, valid_loader, test_loader
 

@@ -54,7 +54,7 @@ class CelebA:
             self.vit_conf = VanillaVit(epochs=50, batch_size=self.b_size, learning_rate=0.0001)
             self.normalize_gaus_params = False
         elif model_name.lower() == 'non_uniform_vit':
-            self.vit_conf = NonUniformVit(epochs=50, batch_size=self.b_size, learning_rate=0.00001)
+            self.vit_conf = NonUniformVit(epochs=50, batch_size=self.b_size, learning_rate=0.000_05)
             self.normalize_gaus_params = False
         else:
             raise ValueError(f'Unknown model name: {model_name}, possible values: vanilla_vit, non_uniform_vit')

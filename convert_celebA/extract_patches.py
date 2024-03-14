@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
@@ -35,8 +37,12 @@ def create_exclusive_patches(data, patch_size=5):
 if __name__ == "__main__":
     patch_size = 5
     num_patches = 80
-    points = torch.rand(num_patches * patch_size, 2)  # Example tensor with random data
-    exclusive_patches = create_exclusive_patches(points)
+    tick = time.time()
+    for i in range(64):
+        points = torch.rand(num_patches * patch_size, 2)  # Example tensor with random data
+        exclusive_patches = create_exclusive_patches(points)
+    tock = time.time()
+    print(f'Elapsed time: {tock - tick:.2f} seconds')
     exclusive_patches = exclusive_patches.reshape(num_patches, patch_size, -1)
 
     print(exclusive_patches.shape)
